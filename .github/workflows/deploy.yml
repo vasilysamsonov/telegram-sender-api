@@ -1,0 +1,48 @@
+name: deploy
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  deploy:
+    runs-on:
+      - self-hosted
+      - linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set deploy variables
+        run: |
+          echo "IMAGE_NAME=telegram-sender-api" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+          echo "DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env" >> "$GITHUB_ENV"
+          echo "APP_BIND_IP=${{ vars.APP_BIND_IP }}" >> "$GITHUB_ENV"
+
+      - name: Verify deploy variables
+        run: |
+          : "${APP_BIND_IP:?GitHub variable APP_BIND_IP is required}"
+
+      - name: Verify Docker
+        run: |
+          docker version
+          docker compose version
+
+      - name: Deploy
+        run: bash scripts/deploy.sh
+
+      - name: Verify health
+        run: |
+          source "$DEPLOY_ENV_FILE"
+          HEALTHCHECK_HOST="${APP_BIND_IP%%,*}"
+          HEALTHCHECK_HOST="${HEALTHCHECK_HOST// /}"
+          if [[ "$HEALTHCHECK_HOST" == "0.0.0.0" ]]; then
+            HEALTHCHECK_HOST="127.0.0.1"
+          fi
+          curl --fail --silent --show-error "http://${HEALTHCHECK_HOST}:${APP_PORT}/healthz"
+
+      - name: Cleanup old images
+        run: bash scripts/cleanup_images.sh

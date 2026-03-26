@@ -1,0 +1,10 @@
+services:
+  telegram-sender-api:
+    image: "${IMAGE_NAME:-telegram-sender-api}:${IMAGE_TAG:-local}"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: telegram-sender-api
+    env_file:
+      - "${DEPLOY_ENV_FILE:-.env}"
+    restart: unless-stopped
