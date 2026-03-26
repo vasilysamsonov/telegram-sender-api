@@ -42,7 +42,15 @@ jobs:
           if [[ "$HEALTHCHECK_HOST" == "0.0.0.0" ]]; then
             HEALTHCHECK_HOST="127.0.0.1"
           fi
-          curl --fail --silent --show-error "http://${HEALTHCHECK_HOST}:${APP_PORT}/healthz"
+          HEALTHCHECK_URL="http://${HEALTHCHECK_HOST}:${APP_PORT}/healthz"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error "$HEALTHCHECK_URL" >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "health check failed: $HEALTHCHECK_URL" >&2
+          exit 1
 
       - name: Cleanup old images
         run: bash scripts/cleanup_images.sh

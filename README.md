@@ -260,7 +260,7 @@ The deployment flow is:
 3. the runner checks out the tagged revision on the target server
 4. the runner builds a Docker image tagged with the Git tag
 5. the application is restarted through `scripts/compose.sh`
-6. the workflow verifies `http://<first-bind-ip>:${APP_PORT}/healthz` on the target server
+6. the workflow waits for `http://<first-bind-ip>:${APP_PORT}/healthz` to become healthy
 7. old image versions are deleted, keeping only:
    - `latest`
    - the current tag
@@ -486,7 +486,15 @@ HEALTHCHECK_HOST="${HEALTHCHECK_HOST// /}"
 if [[ "$HEALTHCHECK_HOST" == "0.0.0.0" ]]; then
   HEALTHCHECK_HOST="127.0.0.1"
 fi
-curl --fail --silent --show-error "http://${HEALTHCHECK_HOST}:${APP_PORT}/healthz"
+HEALTHCHECK_URL="http://${HEALTHCHECK_HOST}:${APP_PORT}/healthz"
+for _ in $(seq 1 30); do
+  if curl --fail --silent --show-error "$HEALTHCHECK_URL" >/dev/null; then
+    exit 0
+  fi
+  sleep 1
+done
+echo "health check failed: $HEALTHCHECK_URL" >&2
+exit 1
 ```
 
 ### What The Cleanup Script Removes
