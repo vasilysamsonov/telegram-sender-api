@@ -21,6 +21,13 @@ func httpStatus(err error) int {
 }
 
 func clientErrorMessage(err error) string {
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "text is empty") || strings.Contains(msg, "text exceeds") {
+			return "text must be between 1 and 4096 characters"
+		}
+	}
+
 	switch {
 	case errors.Is(err, message.ErrInvalidInput):
 		return "invalid request data"

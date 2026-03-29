@@ -3,6 +3,7 @@ package message
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"telegram-sender-api/internal/entity"
@@ -44,6 +45,14 @@ func TestUseCaseSend_ValidatesInput(t *testing.T) {
 			botToken: "token",
 			message:  entity.Message{ChatID: 1},
 		},
+		{
+			name:     "text too long",
+			botToken: "token",
+			message: entity.Message{
+				ChatID: 1,
+				Text:   strings.Repeat("a", MaxTextLength+1),
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -61,6 +70,24 @@ func TestUseCaseSend_ValidatesInput(t *testing.T) {
 				t.Fatal("webapi must not be called on invalid input")
 			}
 		})
+	}
+}
+
+func TestUseCaseSend_AllowsTextAtTelegramLimit(t *testing.T) {
+	t.Parallel()
+
+	webapi := &messageWebAPIStub{}
+	uc := New(webapi)
+	message := entity.Message{
+		ChatID: 1,
+		Text:   strings.Repeat("a", MaxTextLength),
+	}
+
+	if err := uc.Send(context.Background(), "token", message); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !webapi.called {
+		t.Fatal("expected webapi to be called")
 	}
 }
 

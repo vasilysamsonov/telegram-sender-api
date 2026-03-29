@@ -1,6 +1,8 @@
 # Telegram Sender API
 
-Telegram Sender API is a small HTTP service that accepts a Telegram bot token, a target chat ID, and a text message, then forwards the message to the Telegram Bot API.
+Telegram Sender API is a small internal HTTP service that accepts a Telegram bot token, a target chat ID, and a text message, then forwards the message to the Telegram Bot API.
+
+The practical reason for this service is simple: Telegram is blocked in Russia, so the code that actually talks to Telegram runs outside Russia. Access to this service is expected to happen through VPN, which is why plain HTTP is enough for the service itself in the current deployment model.
 
 The service is intentionally focused on one job:
 
@@ -26,10 +28,58 @@ The service is intentionally focused on one job:
 
 This service is useful when:
 
+- your main system is located in Russia and cannot reliably access Telegram directly
+- you need a small relay that lives outside Russia and sends Telegram messages on behalf of internal services
+- access to the relay is limited to a private network or VPN
 - another backend needs a simple internal API for Telegram delivery
 - you want to centralize Telegram send logic behind one HTTP endpoint
 - different callers use different Telegram bot tokens
 - you need one place to apply validation, logging, error mapping, and operational controls
+
+## Trust Model
+
+This service is designed as an internal component, not as a public internet-facing API.
+
+- traffic to the service is expected to go through VPN or another trusted private network
+- in this model, plain HTTP between trusted nodes is acceptable
+- if you ever expose the service outside a trusted network, put it behind TLS and an authenticated reverse proxy
+
+## API
+
+The service accepts:
+
+- `bot_token`: Telegram bot token
+- `chat_id`: Telegram user or group identifier
+- `text`: message text, from 1 to 4096 characters
+
+Current route:
+
+```text
+POST /v1/messages/send
+Content-Type: application/json
+```
+
+Example request:
+
+```json
+{
+  "bot_token": "123456:ABCDEF",
+  "chat_id": -1001234567890,
+  "text": "hello from vpn relay"
+}
+```
+
+Example `curl`:
+
+```bash
+curl -X POST http://127.0.0.1:8086/v1/messages/send \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "bot_token": "123456:ABCDEF",
+    "chat_id": -1001234567890,
+    "text": "hello from vpn relay"
+  }'
+```
 
 ## Requirements
 
@@ -274,8 +324,8 @@ The deployment flow is:
 1. push a Git tag
 2. GitHub Actions starts on the self-hosted runner
 3. the runner checks out the tagged revision on the target server
-4. the workflow calls `make deploy-release`
-5. the workflow runs `make check`
+4. the workflow calls `bash scripts/run_make.sh deploy-release`
+5. the workflow runs `bash scripts/run_make.sh docker-check`
 6. `make deploy-release` builds a Docker image tagged with the Git tag
 7. the application is restarted through Docker Compose
 8. the workflow waits for `http://<first-bind-ip>:${APP_PORT}/healthz` to become healthy
@@ -433,6 +483,7 @@ After changing group membership, restart the session or the runner service.
 Use `make help` to see the full list. The main operational targets are:
 
 - `make check`
+- `make docker-check`
 - `make verify-deploy-env DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env`
 - `make verify-docker`
 - `make print-vars`
@@ -446,13 +497,16 @@ Use `make help` to see the full list. The main operational targets are:
 
 Recommended target usage:
 
-- `make check` for a local or CI quality gate
+- `make check` for a local quality gate when Go is installed on the host
+- `make docker-check` for CI or self-hosted runners that should not have Go installed on the host
 - `make deploy-release` for normal production deployment
 - `make rollback-release` for a fast rollback to the previous local image tag with the same compose-managed container
 
 Compatibility note:
 
 - `scripts/deploy.sh` is kept as a thin wrapper over `make deploy` for backward compatibility
+- `scripts/run_make.sh` runs `make` or `gmake`, which helps on self-hosted runners where GNU Make is installed under a different binary name
+- the GitHub Actions workflow uses `make docker-check`, so the self-hosted runner does not need a host Go installation
 
 ### How To Deploy
 

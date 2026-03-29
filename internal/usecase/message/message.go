@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"telegram-sender-api/internal/entity"
 	"telegram-sender-api/internal/repo"
 )
+
+const MaxTextLength = 4096
 
 type UseCase struct {
 	webAPI repo.MessageWebAPI
@@ -28,6 +31,9 @@ func (uc *UseCase) Send(ctx context.Context, botToken string, message entity.Mes
 	}
 	if strings.TrimSpace(message.Text) == "" {
 		return fmt.Errorf("text is empty: %w", ErrInvalidInput)
+	}
+	if utf8.RuneCountInString(message.Text) > MaxTextLength {
+		return fmt.Errorf("text exceeds %d characters: %w", MaxTextLength, ErrInvalidInput)
 	}
 
 	if err := uc.webAPI.SendMessage(ctx, botToken, message); err != nil {

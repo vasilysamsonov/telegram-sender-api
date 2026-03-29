@@ -23,13 +23,13 @@ jobs:
           echo "APP_BIND_IP=${{ vars.APP_BIND_IP }}" >> "$GITHUB_ENV"
 
       - name: Verify deploy variables
-        run: make verify-deploy-env
+        run: bash scripts/run_make.sh verify-deploy-env
 
       - name: Verify Docker
-        run: make verify-docker
+        run: bash scripts/run_make.sh verify-docker
 
       - name: Quality gate
-        run: make check
+        run: bash scripts/run_make.sh docker-check
 
       - name: Deploy
-        run: make deploy-release
+        run: bash scripts/run_make.sh deploy-release

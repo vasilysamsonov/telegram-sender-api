@@ -17,6 +17,8 @@ HEALTHCHECK_DELAY ?= 1
 GO_MAIN ?= ./cmd/app
 BINARY_PATH ?= ./bin/$(APP_NAME)
 GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
+GO_MOD_CACHE_DIR ?= $(CURDIR)/.cache/go-mod
+GO_DOCKER_IMAGE ?= golang:1.26-alpine
 
 export APP_NAME
 export SERVICE_NAME
@@ -46,6 +48,7 @@ endef
 	verify-format \
 	test \
 	check \
+	docker-check \
 	build \
 	run \
 	docker-build \
@@ -83,6 +86,8 @@ print-vars: ## Print resolved operational variables
 	printf '%s=%s\n' "GO_MAIN" "$(GO_MAIN)"
 	printf '%s=%s\n' "BINARY_PATH" "$(BINARY_PATH)"
 	printf '%s=%s\n' "GOCACHE" "$(GOCACHE)"
+	printf '%s=%s\n' "GOMODCACHE" "$(GO_MOD_CACHE_DIR)"
+	printf '%s=%s\n' "GO_DOCKER_IMAGE" "$(GO_DOCKER_IMAGE)"
 
 preflight: ## Verify required local tooling
 	$(call require_command,go)
@@ -102,12 +107,14 @@ verify-docker: ## Print Docker and Docker Compose versions
 	docker compose version
 
 fmt: ## Format Go code
-	$(call require_command,gofmt)
-	gofmt -w $$(find . -name '*.go' -not -path './vendor/*')
+	$(call require_command,go)
+	gofmt_bin="$$(go env GOROOT)/bin/gofmt"
+	"$$gofmt_bin" -w $$(find . -name '*.go' -not -path './vendor/*')
 
 verify-format: ## Verify that Go code is formatted
-	$(call require_command,gofmt)
-	unformatted="$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*'))"
+	$(call require_command,go)
+	gofmt_bin="$$(go env GOROOT)/bin/gofmt"
+	unformatted="$$("$$gofmt_bin" -l $$(find . -name '*.go' -not -path './vendor/*'))"
 	[[ -z "$$unformatted" ]] || { echo "gofmt check failed for:" >&2; printf '%s\n' "$$unformatted" >&2; exit 1; }
 
 test: ## Run unit tests
@@ -116,6 +123,21 @@ test: ## Run unit tests
 	go test ./...
 
 check: verify-format test build ## Run the local quality gate
+
+docker-check: verify-docker ## Run the quality gate inside a Dockerized Go toolchain
+	mkdir -p "$(CURDIR)/.cache/go-build-docker" "$(GO_MOD_CACHE_DIR)" "$(dir $(BINARY_PATH))"
+	docker run --rm \
+		-v "$(CURDIR):/workspace" \
+		-w /workspace \
+		-e GOCACHE=/workspace/.cache/go-build-docker \
+		-e GOMODCACHE=/workspace/.cache/go-mod \
+		"$(GO_DOCKER_IMAGE)" \
+		sh -eu -c ' \
+			unformatted="$$(gofmt -l $$(find . -name '\''*.go'\'' -not -path '\''./vendor/*'\''))"; \
+			[ -z "$$unformatted" ] || { echo "gofmt check failed for:" >&2; printf "%s\n" "$$unformatted" >&2; exit 1; }; \
+			go test ./...; \
+			go build -o "$(BINARY_PATH)" "$(GO_MAIN)" \
+		'
 
 build: ## Build the application binary
 	$(call require_command,go)
