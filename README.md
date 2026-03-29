@@ -128,7 +128,7 @@ http://localhost:8086
 ## Build
 
 ```bash
-go build -o telegram-sender-api ./cmd/app
+make build
 ```
 
 ## Docker
@@ -136,7 +136,13 @@ go build -o telegram-sender-api ./cmd/app
 ### Build the image
 
 ```bash
-docker build -t telegram-sender-api .
+make docker-build
+```
+
+Override the release tag when needed:
+
+```bash
+make docker-build IMAGE_TAG=v1.2.3
 ```
 
 ### Run the container directly
@@ -152,7 +158,7 @@ If you use a different port in `.env`, adjust the published port accordingly.
 
 ## Docker Compose
 
-The repository includes a base `docker-compose.yml` and a helper wrapper `scripts/compose.sh`.
+The repository includes a base `docker-compose.yml`, a helper wrapper `scripts/compose.sh`, and a root `Makefile` that acts as the main operational entrypoint.
 
 The wrapper reads `APP_BIND_IP` and generates the correct Docker Compose port mappings. This is required because standard Compose variable interpolation cannot expand a comma-separated IP list into multiple `ports` entries.
 It also fixes the Compose project name to `telegram-sender-api` and refuses to operate on an existing `telegram-sender-api` container if that container is not owned by the same Compose project and service.
@@ -160,73 +166,82 @@ It also fixes the Compose project name to `telegram-sender-api` and refuses to o
 Start the service:
 
 ```bash
-bash scripts/compose.sh up --build
+make compose-build
+make compose-up
 ```
 
 Run in background:
 
 ```bash
-bash scripts/compose.sh up --build -d
+make compose-build
+make compose-up
 ```
 
 Build the image without starting containers:
 
 ```bash
-bash scripts/compose.sh build
+make compose-build
 ```
 
 Rebuild the image without using cache:
 
 ```bash
-bash scripts/compose.sh build --no-cache
+docker build --no-cache -t telegram-sender-api:local .
 ```
 
 Recreate containers with a fresh build:
 
 ```bash
-bash scripts/compose.sh up --build --force-recreate -d
+make compose-build
+make compose-up
 ```
 
 Stop the service:
 
 ```bash
-bash scripts/compose.sh stop
+make compose-stop
 ```
 
 Stop and remove containers, networks, and compose-managed resources:
 
 ```bash
-bash scripts/compose.sh down
+make compose-down
 ```
 
 Show running services:
 
 ```bash
-bash scripts/compose.sh ps
+make compose-ps
 ```
 
 Follow logs:
 
 ```bash
-bash scripts/compose.sh logs -f
+make compose-logs
 ```
 
 Follow logs for the application only:
 
 ```bash
-bash scripts/compose.sh logs -f telegram-sender-api
+make compose-logs
 ```
 
 Restart the application container:
 
 ```bash
-bash scripts/compose.sh restart telegram-sender-api
+make compose-restart
 ```
 
 Remove old dangling images after rebuilds:
 
 ```bash
-docker image prune -f
+make cleanup-images IMAGE_TAG=<current-tag>
+```
+
+Print resolved operational variables:
+
+```bash
+make print-vars
 ```
 
 Compose behavior:
@@ -248,8 +263,9 @@ If it is not set, startup fails fast instead of silently binding to an unintende
 The repository includes a GitHub Actions workflow for tag-based deployment to a server running a self-hosted runner:
 
 - workflow file: `.github/workflows/deploy.yml`
-- deploy script: `scripts/deploy.sh`
+- deploy script wrapper: `scripts/deploy.sh`
 - image cleanup script: `scripts/cleanup_images.sh`
+- operational entrypoint: `Makefile`
 
 ### Deployment Model
 
@@ -258,10 +274,12 @@ The deployment flow is:
 1. push a Git tag
 2. GitHub Actions starts on the self-hosted runner
 3. the runner checks out the tagged revision on the target server
-4. the runner builds a Docker image tagged with the Git tag
-5. the application is restarted through `scripts/compose.sh`
-6. the workflow waits for `http://<first-bind-ip>:${APP_PORT}/healthz` to become healthy
-7. old image versions are deleted, keeping only:
+4. the workflow calls `make deploy-release`
+5. the workflow runs `make check`
+6. `make deploy-release` builds a Docker image tagged with the Git tag
+7. the application is restarted through Docker Compose
+8. the workflow waits for `http://<first-bind-ip>:${APP_PORT}/healthz` to become healthy
+9. old image versions are deleted, keeping only:
    - `latest`
    - the current tag
    - the previous tag
@@ -297,7 +315,7 @@ The target server must have:
 /opt/telegram-sender-api/.env
 ```
 
-The deploy script uses that file by default.
+The deployment targets use that file by default when `DEPLOY_ENV_FILE` points to it.
 
 ### Recommended Server Layout
 
@@ -312,7 +330,7 @@ Notes:
 
 - `.env` is stored outside the repository checkout
 - the repository workspace is managed by the GitHub Actions runner
-- the deployment script reads runtime configuration from `/opt/telegram-sender-api/.env`
+- the deployment targets read runtime configuration from `/opt/telegram-sender-api/.env`
 
 ### Example Server `.env`
 
@@ -409,6 +427,32 @@ sudo usermod -aG docker <runner-user>
 ```
 
 After changing group membership, restart the session or the runner service.
+
+### Make Targets
+
+Use `make help` to see the full list. The main operational targets are:
+
+- `make check`
+- `make verify-deploy-env DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env`
+- `make verify-docker`
+- `make print-vars`
+- `make docker-build IMAGE_TAG=v1.2.3`
+- `make compose-up DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env IMAGE_TAG=v1.2.3`
+- `make healthcheck DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env`
+- `make previous-tag IMAGE_TAG=v1.2.3`
+- `make rollback-release DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env IMAGE_TAG=v1.2.3`
+- `make cleanup-images IMAGE_TAG=v1.2.3`
+- `make deploy-release DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env IMAGE_TAG=v1.2.3`
+
+Recommended target usage:
+
+- `make check` for a local or CI quality gate
+- `make deploy-release` for normal production deployment
+- `make rollback-release` for a fast rollback to the previous local image tag with the same compose-managed container
+
+Compatibility note:
+
+- `scripts/deploy.sh` is kept as a thin wrapper over `make deploy` for backward compatibility
 
 ### How To Deploy
 
@@ -566,11 +610,10 @@ Because the cleanup script keeps the previous tag, a simple rollback path is sti
 Example manual rollback:
 
 ```bash
-docker tag telegram-sender-api:<previous-tag> telegram-sender-api:latest
-IMAGE_NAME=telegram-sender-api IMAGE_TAG=<previous-tag> DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env bash scripts/compose.sh up -d --force-recreate telegram-sender-api
+make rollback-release DEPLOY_ENV_FILE=/opt/telegram-sender-api/.env IMAGE_TAG=<current-tag>
 ```
 
-Replace `<previous-tag>` with the actual tag you want to restore.
+Replace `<current-tag>` with the version that is currently deployed. The rollback target resolves the previous local image tag automatically.
 
 ### Common Deployment Failure Cases
 

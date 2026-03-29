@@ -23,34 +23,13 @@ jobs:
           echo "APP_BIND_IP=${{ vars.APP_BIND_IP }}" >> "$GITHUB_ENV"
 
       - name: Verify deploy variables
-        run: |
-          : "${APP_BIND_IP:?GitHub variable APP_BIND_IP is required}"
+        run: make verify-deploy-env
 
       - name: Verify Docker
-        run: |
-          docker version
-          docker compose version
+        run: make verify-docker
+
+      - name: Quality gate
+        run: make check
 
       - name: Deploy
-        run: bash scripts/deploy.sh
-
-      - name: Verify health
-        run: |
-          source "$DEPLOY_ENV_FILE"
-          HEALTHCHECK_HOST="${APP_BIND_IP%%,*}"
-          HEALTHCHECK_HOST="${HEALTHCHECK_HOST// /}"
-          if [[ "$HEALTHCHECK_HOST" == "0.0.0.0" ]]; then
-            HEALTHCHECK_HOST="127.0.0.1"
-          fi
-          HEALTHCHECK_URL="http://${HEALTHCHECK_HOST}:${APP_PORT}/healthz"
-          for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error "$HEALTHCHECK_URL" >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "health check failed: $HEALTHCHECK_URL" >&2
-          exit 1
-
-      - name: Cleanup old images
-        run: bash scripts/cleanup_images.sh
+        run: make deploy-release
